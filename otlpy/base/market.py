@@ -22,7 +22,7 @@ class ORDER_TYPE(Enum):
     MARKET = auto()
 
 
-class Order:
+class BaseOrder:
     def __init__(
         self,
         ticker: str,
