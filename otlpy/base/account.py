@@ -5,7 +5,7 @@ import numpy as np
 from otlpy.base import market
 
 
-class Order(market.Order):
+class Order(market.BaseOrder):
     def __init__(
         self,
         oside: market.ORDER_SIDE,
@@ -131,11 +131,14 @@ class Inventory:
         self,
         ticker: str,
         unit: float,
+        cost: float,
     ) -> None:
         self.ticker = ticker
         self.unit = unit
+        self.cost = cost
         self.orders: dict[str, Order] = {}
         self.realized_pnl: float = 0
+        self.realized_cost: float = 0
         self.pos: float = 0
         self.price: float = 0
         self.opened_buy: float = 0
@@ -145,7 +148,9 @@ class Inventory:
         return (price - self.price) * self.pos * self.unit
 
     def total_pnl(self, price: float) -> float:
-        return self.realized_pnl + self.unrealized_pnl(price)
+        return (
+            self.realized_pnl - self.realized_cost + self.unrealized_pnl(price)
+        )
 
     def add_order(self, order: Order) -> None:
         self.orders[order.uid] = order
@@ -172,6 +177,7 @@ class Inventory:
             self.realized_pnl += (price - self.price) * self.pos * self.unit
             self.price = price
             self.pos += pos
+        self.realized_cost += np.abs(self.pos) * price * self.unit * self.cost
 
     def filled_total(
         self,
