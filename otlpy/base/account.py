@@ -1,6 +1,8 @@
 from typing import Any, Optional
 
 import numpy as np
+from loguru import logger
+from tompy.stdlib import Datetime
 
 from otlpy.base import market
 
@@ -46,6 +48,8 @@ class Order(market.BaseOrder):
         total_filled_price: float,
         total_opened: float,
     ) -> tuple[float, float, float]:
+        assert total_filled >= self.filled, f"{total_filled} {self.filled}"
+        assert self.opened >= total_opened, f"{self.opened} {total_opened}"
         filled = total_filled - self.filled
         if filled > 0:
             filled_price = (
@@ -131,28 +135,33 @@ class Inventory:
         self,
         ticker: str,
         unit: float,
-        cost: float,
+        fee: float,
+        fee_rate: float,
     ) -> None:
+        assert unit > 0 and fee >= 0 and fee_rate >= 0
         self.ticker = ticker
         self.unit = unit
-        self.cost = cost
+        self.fee = fee
+        self.fee_rate = fee_rate
         self.orders: dict[str, Order] = {}
         self.realized_pnl: float = 0
-        self.realized_cost: float = 0
+        self.realized_fee: float = 0
         self.pos: float = 0
         self.price: float = 0
         self.opened_buy: float = 0
         self.opened_sell: float = 0
+        self.timestamp = Datetime.now()
 
     def unrealized_pnl(self, price: float) -> float:
         return (price - self.price) * self.pos * self.unit
 
     def total_pnl(self, price: float) -> float:
         return (
-            self.realized_pnl - self.realized_cost + self.unrealized_pnl(price)
+            self.realized_pnl - self.realized_fee + self.unrealized_pnl(price)
         )
 
     def add_order(self, order: Order) -> None:
+        assert self.ticker == order.ticker, f"{self.ticker} {order.ticker}"
         self.orders[order.uid] = order
         if order.oside == market.ORDER_SIDE.BUY:
             self.opened_buy += order.opened
@@ -167,9 +176,9 @@ class Inventory:
         price: float,
     ) -> None:
         if self.pos * pos > 0:
-            spp = self.price * self.pos + price * pos
+            pp = self.price * self.pos + price * pos
             self.pos += pos
-            self.price = spp / self.pos
+            self.price = pp / self.pos
         elif np.abs(pos) <= np.abs(self.pos):
             self.realized_pnl += (self.price - price) * pos * self.unit
             self.pos += pos
@@ -177,7 +186,16 @@ class Inventory:
             self.realized_pnl += (price - self.price) * self.pos * self.unit
             self.price = price
             self.pos += pos
-        self.realized_cost += np.abs(self.pos) * price * self.unit * self.cost
+        self.realized_fee += (
+            self.fee + price * self.unit * self.fee_rate
+        ) * np.abs(pos)
+        self.timestamp = Datetime.now()
+        ur_pnl = self.unrealized_pnl(price)
+        pnl = self.total_pnl(price)
+        logger.info(f"FILLED {pos} {price} -> {self.pos} {self.price}")
+        logger.info(
+            f"PNL {pnl} = {self.realized_pnl} - {self.realized_fee} + {ur_pnl}"
+        )
 
     def filled_total(
         self,
@@ -201,6 +219,28 @@ class Inventory:
             assert False
         if pos != 0:
             self.filled_position(pos, filled_price)
+
+    def check_validity(self) -> None:
+        filled_buy: float = 0
+        filled_sell: float = 0
+        opened_buy: float = 0
+        opened_sell: float = 0
+        for order in self.orders.values():
+            if order.oside == market.ORDER_SIDE.BUY:
+                filled_buy += order.filled
+                opened_buy += order.opened
+            elif order.oside == market.ORDER_SIDE.SELL:
+                filled_sell += order.filled
+                opened_sell += order.opened
+            else:
+                assert False
+        assert (
+            self.pos == filled_buy - filled_sell
+        ), f"{self.pos} {filled_buy} {filled_sell}"
+        assert self.opened_buy == opened_buy, f"{self.opened_buy} {opened_buy}"
+        assert (
+            self.opened_sell == opened_sell
+        ), f"{self.opened_sell} {opened_sell}"
 
 
 class Book:

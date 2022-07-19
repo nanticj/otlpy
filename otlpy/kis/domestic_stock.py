@@ -55,9 +55,14 @@ class DomesticStock:
             "tr_id": tr_id,
             "hashkey": await self.common.hash(client, data, 0, False),
         }
-        _, rdata = await post(client, url_path, headers, data, sleep, debug)
+        rheaders, rdata = await post(
+            client, url_path, headers, data, sleep, debug
+        )
         if not rdata or rdata["rt_cd"] != "0":
-            logger.error("\n%s\n%s\n%s" % (url_path, data, rdata))
+            logger.error(
+                "\n%s\n%s\n%s\n%s\n%s"
+                % (url_path, headers, data, rheaders, rdata)
+            )
             return order
         order.rdata = rdata["output"]
         order.uid = order.rdata["ODNO"]
@@ -97,13 +102,18 @@ class DomesticStock:
             "tr_id": tr_id,
             "hashkey": await self.common.hash(client, data, 0, False),
         }
-        _, rdata = await post(client, url_path, headers, data, sleep, debug)
+        rheaders, rdata = await post(
+            client, url_path, headers, data, sleep, debug
+        )
         if not rdata or rdata["rt_cd"] != "0":
-            logger.error("\n%s\n%s\n%s" % (url_path, data, rdata))
+            logger.error(
+                "\n%s\n%s\n%s\n%s\n%s"
+                % (url_path, headers, data, rheaders, rdata)
+            )
             return order
         order.rdata = rdata["output"]
         order.uid = order.rdata["ODNO"]
-        order.opened = order.origin.opened
+        order.opened = order.qty
         return order
 
     async def buy(
@@ -258,49 +268,84 @@ class DomesticStock:
         self,
         client: AsyncClient,
         yyyymmdd: str,
+        tr_cont: str,
+        ctx_area_fk100: str,
+        ctx_area_nk100: str,
+        sleep: float,
+        debug: bool,
+    ) -> tuple[list[Any], str, str, str]:
+        tr_id = "TTTC8001R"
+        url_path = "/uapi/domestic-stock/v1/trading/inquire-daily-ccld"
+        data = {
+            "CANO": self.settings.kis_account_cano_domestic_stock,
+            "ACNT_PRDT_CD": self.settings.kis_account_prdt_domestic_stock,
+            "INQR_STRT_DT": yyyymmdd,
+            "INQR_END_DT": yyyymmdd,
+            "SLL_BUY_DVSN_CD": "00",
+            "INQR_DVSN": "00",
+            "PDNO": "",
+            "CCLD_DVSN": "00",
+            "ORD_GNO_BRNO": "",
+            "ODNO": "",
+            "INQR_DVSN_3": "",
+            "INQR_DVSN_1": "",
+            "CTX_AREA_FK100": ctx_area_fk100,
+            "CTX_AREA_NK100": ctx_area_nk100,
+        }
+        headers = {
+            **self.common.headers4(),
+            "tr_id": tr_id,
+            "tr_cont": tr_cont,
+        }
+        rheaders, rdata = await get(
+            client, url_path, headers, data, sleep, debug
+        )
+        if not rdata or rdata["rt_cd"] != "0":
+            logger.error(
+                "\n%s\n%s\n%s\n%s\n%s"
+                % (url_path, headers, data, rheaders, rdata)
+            )
+            return [], "", "", ""
+        if rheaders["tr_cont"] == "D" or rheaders["tr_cont"] == "E":
+            return rdata["output1"], "", "", ""
+        if rheaders["tr_cont"] == "F" or rheaders["tr_cont"] == "M":
+            return (
+                rdata["output1"],
+                "N",
+                rdata["ctx_area_fk100"],
+                rdata["ctx_area_nk100"],
+            )
+        assert False
+
+    async def loop_all_orders(
+        self,
+        client: AsyncClient,
+        yyyymmdd: str,
         sleep: float,
         debug: bool,
     ) -> list[Any]:
-        tr_id = "TTTC8001R"
         tr_cont = ""
         ctx_area_fk100 = ""
         ctx_area_nk100 = ""
-        url_path = "/uapi/domestic-stock/v1/trading/inquire-daily-ccld"
         outlist: list[Any] = []
         while True:
-            data = {
-                "CANO": self.settings.kis_account_cano_domestic_stock,
-                "ACNT_PRDT_CD": self.settings.kis_account_prdt_domestic_stock,
-                "INQR_STRT_DT": yyyymmdd,
-                "INQR_END_DT": yyyymmdd,
-                "SLL_BUY_DVSN_CD": "00",
-                "INQR_DVSN": "00",
-                "PDNO": "",
-                "CCLD_DVSN": "00",
-                "ORD_GNO_BRNO": "",
-                "ODNO": "",
-                "INQR_DVSN_3": "",
-                "INQR_DVSN_1": "",
-                "CTX_AREA_FK100": ctx_area_fk100,
-                "CTX_AREA_NK100": ctx_area_nk100,
-            }
-            headers = {
-                **self.common.headers4(),
-                "tr_id": tr_id,
-                "tr_cont": tr_cont,
-            }
-            rheaders, rdata = await get(
-                client, url_path, headers, data, sleep, debug
+            (
+                out0,
+                tr_cont,
+                ctx_area_fk100,
+                ctx_area_nk100,
+            ) = await self.all_orders(
+                client,
+                yyyymmdd,
+                tr_cont,
+                ctx_area_fk100,
+                ctx_area_nk100,
+                sleep,
+                debug,
             )
-            if not rdata or rdata["rt_cd"] != "0":
-                logger.error("\n%s\n%s\n%s" % (url_path, data, rdata))
+            outlist = outlist + out0
+            if not tr_cont:
                 return outlist
-            outlist = outlist + rdata["output1"]
-            if rheaders["tr_cont"] == "D" or rheaders["tr_cont"] == "E":
-                return outlist
-            tr_cont = "N"
-            ctx_area_fk100 = rdata["ctx_area_fk100"]
-            ctx_area_nk100 = rdata["ctx_area_nk100"]
 
     async def limitorderbook(
         self,
@@ -321,9 +366,14 @@ class DomesticStock:
             **self.common.headers4(),
             "tr_id": tr_id,
         }
-        _, rdata = await get(client, url_path, headers, data, sleep, debug)
+        rheaders, rdata = await get(
+            client, url_path, headers, data, sleep, debug
+        )
         if not rdata or rdata["rt_cd"] != "0":
-            logger.error("\n%s\n%s\n%s" % (url_path, data, rdata))
+            logger.error(
+                "\n%s\n%s\n%s\n%s\n%s"
+                % (url_path, headers, data, rheaders, rdata)
+            )
             return {}
         return dict(rdata["output1"])
 

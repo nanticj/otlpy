@@ -39,7 +39,10 @@ def response_processing(
         )
         rdata = {}
     elif debug:
-        logger.debug("\n%s\n%s\n%s" % (url_path, data, rdata))
+        logger.debug(
+            "\n%s\n%s\n%s\n%s\n%s\n%s"
+            % (url_path, headers, data, r, rheaders, rdata)
+        )
     return rheaders, rdata
 
 

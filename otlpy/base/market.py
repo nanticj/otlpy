@@ -1,6 +1,8 @@
 from enum import Enum, auto
 from typing import Optional
 
+from tompy.stdlib import Datetime
+
 
 class MARKET_TYPE(Enum):
     LIT_POOL = auto()
@@ -36,6 +38,7 @@ class BaseOrder:
         self.otype = otype
         self.qty = qty
         self.price = price
+        self.timestamp = Datetime.now()
 
 
 class PQN:
@@ -53,28 +56,30 @@ class PQN:
 class LimitOrderBook:
     def __init__(
         self,
-        timestamp: str,
+        stime: str,
         ticker: str,
         bid: list[PQN],
         ask: list[PQN],
     ) -> None:
-        self.timestamp = timestamp
+        self.stime = stime
         self.ticker = ticker
         self.bid = bid
         self.ask = ask
+        self.timestamp = Datetime.now()
 
 
 class Price:
     def __init__(
         self,
-        timestamp: str,
+        stime: str,
         ticker: str,
         trade: PQN,
         bid: Optional[PQN],
         ask: Optional[PQN],
     ) -> None:
-        self.timestamp = timestamp
+        self.stime = stime
         self.ticker = ticker
         self.trade = trade
         self.bid = bid
         self.ask = ask
+        self.timestamp = Datetime.now()
