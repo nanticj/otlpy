@@ -134,12 +134,14 @@ class Inventory:
     def __init__(
         self,
         ticker: str,
+        ticksize: float,
         unit: float,
         fee: float,
         fee_rate: float,
     ) -> None:
-        assert unit > 0 and fee >= 0 and fee_rate >= 0
+        assert ticksize > 0 and unit > 0 and fee >= 0 and fee_rate >= 0
         self.ticker = ticker
+        self.ticksize = ticksize
         self.unit = unit
         self.fee = fee
         self.fee_rate = fee_rate
@@ -151,6 +153,18 @@ class Inventory:
         self.opened_buy: float = 0
         self.opened_sell: float = 0
         self.timestamp = Datetime.now()
+
+    def bid_adjust(self, price: float) -> float:
+        return float(np.floor(price / self.ticksize) * self.ticksize)
+
+    def ask_adjust(self, price: float) -> float:
+        return float(np.ceil(price / self.ticksize) * self.ticksize)
+
+    def bid_min(self, bid: float, price: float) -> float:
+        return min(bid, self.bid_adjust(price))
+
+    def ask_max(self, ask: float, price: float) -> float:
+        return max(ask, self.ask_adjust(price))
 
     def unrealized_pnl(self, price: float) -> float:
         return (price - self.price) * self.pos * self.unit
@@ -192,8 +206,9 @@ class Inventory:
         self.timestamp = Datetime.now()
         ur_pnl = self.unrealized_pnl(price)
         pnl = self.total_pnl(price)
-        logger.info(f"FILLED {pos} {price} -> {self.pos} {self.price}")
         logger.info(
+            f"FIL {pos} {price} "
+            f"POS {self.pos} {self.price} "
             f"PNL {pnl} = {self.realized_pnl} - {self.realized_fee} + {ur_pnl}"
         )
 
@@ -248,11 +263,14 @@ class Book:
         self.ois: dict[str, tuple[Order, Inventory]] = {}
 
     def add(self, order: Order, inventory: Inventory) -> None:
-        self.ois[order.uid] = (order, inventory)
-        inventory.add_order(order)
+        if order.uid:
+            self.ois[order.uid] = (order, inventory)
+            inventory.add_order(order)
 
     def get(self, uid: str) -> tuple[Optional[Order], Optional[Inventory]]:
-        oi = self.ois.get(uid)
-        if oi is None:
-            return None, None
-        return oi
+        if uid:
+            oi = self.ois.get(uid)
+            if oi is None:
+                return None, None
+            return oi
+        return None, None
