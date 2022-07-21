@@ -11,8 +11,11 @@ from otlpy.kis.common import Common
 
 class DomesticStock:
     def __init__(self, common: Common) -> None:
-        self.common = common
-        self.settings = common.settings
+        self.__common = common
+
+    @property
+    def common(self) -> Common:
+        return self.__common
 
     def order_type(self, order_type: ORDER_TYPE) -> str:
         if order_type == ORDER_TYPE.LIMIT:
@@ -30,11 +33,6 @@ class DomesticStock:
         sleep: float,
         debug: bool,
     ) -> Order:
-        order.qty = int(order.qty)
-        if order.otype == ORDER_TYPE.MARKET:
-            order.price = int(0)
-        else:
-            order.price = int(order.price)
         if order.oside == ORDER_SIDE.BUY:
             tr_id = "TTTC0802U"
         elif order.oside == ORDER_SIDE.SELL:
@@ -43,8 +41,8 @@ class DomesticStock:
             assert False
         url_path = "/uapi/domestic-stock/v1/trading/order-cash"
         data = {
-            "CANO": self.settings.kis_account_cano_domestic_stock,
-            "ACNT_PRDT_CD": self.settings.kis_account_prdt_domestic_stock,
+            "CANO": self.common.kis_account_cano_domestic_stock,
+            "ACNT_PRDT_CD": self.common.kis_account_prdt_domestic_stock,
             "PDNO": order.ticker,
             "ORD_DVSN": self.order_type(order.otype),
             "ORD_QTY": str(int(order.qty)),
@@ -64,9 +62,8 @@ class DomesticStock:
                 % (url_path, headers, data, rheaders, rdata)
             )
             return order
-        order.rdata = rdata["output"]
-        order.uid = order.rdata["ODNO"]
-        order.opened = order.qty
+        rdata_output = rdata["output"]
+        order.acknowledgment(rdata_output, rdata_output["ODNO"], order.qty)
         return order
 
     async def cancel_or_replace_order(
@@ -78,17 +75,15 @@ class DomesticStock:
     ) -> Order:
         if isinstance(order, Cancel):
             omsg = "02"
-            order.price = int(0)
         elif isinstance(order, Replace):
             omsg = "01"
-            order.price = int(order.price)
         else:
             assert False
         tr_id = "TTTC0803U"
         url_path = "/uapi/domestic-stock/v1/trading/order-rvsecncl"
         data = {
-            "CANO": self.settings.kis_account_cano_domestic_stock,
-            "ACNT_PRDT_CD": self.settings.kis_account_prdt_domestic_stock,
+            "CANO": self.common.kis_account_cano_domestic_stock,
+            "ACNT_PRDT_CD": self.common.kis_account_prdt_domestic_stock,
             "KRX_FWDG_ORD_ORGNO": order.origin.rdata["KRX_FWDG_ORD_ORGNO"],
             "ORGN_ODNO": order.origin.rdata["ODNO"],
             "ORD_DVSN": self.order_type(order.otype),
@@ -111,9 +106,8 @@ class DomesticStock:
                 % (url_path, headers, data, rheaders, rdata)
             )
             return order
-        order.rdata = rdata["output"]
-        order.uid = order.rdata["ODNO"]
-        order.opened = order.qty
+        rdata_output = rdata["output"]
+        order.acknowledgment(rdata_output, rdata_output["ODNO"], order.qty)
         return order
 
     async def buy(
@@ -127,7 +121,7 @@ class DomesticStock:
         debug: bool,
     ) -> Order:
         return await self.new_order(
-            client, Buy(order_type, ticker, qty, price), sleep, debug
+            client, Buy(order_type, ticker, int(qty), int(price)), sleep, debug
         )
 
     async def buy_market(
@@ -166,7 +160,10 @@ class DomesticStock:
         debug: bool,
     ) -> Order:
         return await self.new_order(
-            client, Sell(order_type, ticker, qty, price), sleep, debug
+            client,
+            Sell(order_type, ticker, int(qty), int(price)),
+            sleep,
+            debug,
         )
 
     async def sell_market(
@@ -238,7 +235,7 @@ class DomesticStock:
         debug: bool,
     ) -> Order:
         return await self.cancel_or_replace_order(
-            client, Replace(origin, order_type, price), sleep, debug
+            client, Replace(origin, order_type, int(price)), sleep, debug
         )
 
     async def replace_market(
@@ -277,8 +274,8 @@ class DomesticStock:
         tr_id = "TTTC8001R"
         url_path = "/uapi/domestic-stock/v1/trading/inquire-daily-ccld"
         data = {
-            "CANO": self.settings.kis_account_cano_domestic_stock,
-            "ACNT_PRDT_CD": self.settings.kis_account_prdt_domestic_stock,
+            "CANO": self.common.kis_account_cano_domestic_stock,
+            "ACNT_PRDT_CD": self.common.kis_account_prdt_domestic_stock,
             "INQR_STRT_DT": yyyymmdd,
             "INQR_END_DT": yyyymmdd,
             "SLL_BUY_DVSN_CD": "00",
@@ -384,11 +381,11 @@ class DomesticStock:
             tr_type = "2"
         return (
             '{"header":{"appkey":"'
-            + self.settings.kis_app_key
+            + self.common.kis_app_key
             + '","appsecret":"'
-            + self.settings.kis_app_secret
+            + self.common.kis_app_secret
             + '","custtype":"'
-            + self.settings.kis_account_custtype
+            + self.common.kis_account_custtype
             + '","tr_type":"'
             + tr_type
             + '","content-type":"utf-8"},"body":{"input":{"tr_id":"'
@@ -408,5 +405,5 @@ class DomesticStock:
 
     def ws_senddata_execution(self, subscribe: bool = True) -> str:
         return self.ws_senddata(
-            subscribe, "H0STCNI0", self.settings.kis_account_htsid
+            subscribe, "H0STCNI0", self.common.kis_account_htsid
         )

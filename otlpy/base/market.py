@@ -1,3 +1,4 @@
+import datetime
 from enum import Enum, auto
 from typing import Optional
 
@@ -33,12 +34,36 @@ class BaseOrder:
         qty: float,
         price: float,
     ) -> None:
-        self.ticker = ticker
-        self.oside = oside
-        self.otype = otype
-        self.qty = qty
-        self.price = price
-        self.timestamp = Datetime.now()
+        self.__ticker = ticker
+        self.__oside = oside
+        self.__otype = otype
+        self.__qty = qty
+        self.__price = price
+        self.__updated_at = Datetime.now()
+
+    @property
+    def ticker(self) -> str:
+        return self.__ticker
+
+    @property
+    def oside(self) -> ORDER_SIDE:
+        return self.__oside
+
+    @property
+    def otype(self) -> ORDER_TYPE:
+        return self.__otype
+
+    @property
+    def qty(self) -> float:
+        return self.__qty
+
+    @property
+    def price(self) -> float:
+        return self.__price
+
+    @property
+    def updated_at(self) -> datetime.datetime:
+        return self.__updated_at
 
 
 class PQN:
@@ -48,9 +73,21 @@ class PQN:
         qty: float,
         num: Optional[int] = None,
     ) -> None:
-        self.price = price
-        self.qty = qty
-        self.num = num
+        self.__price = price
+        self.__qty = qty
+        self.__num = num
+
+    @property
+    def price(self) -> float:
+        return self.__price
+
+    @property
+    def qty(self) -> float:
+        return self.__qty
+
+    @property
+    def num(self) -> Optional[int]:
+        return self.__num
 
 
 class LimitOrderBook:
@@ -61,11 +98,31 @@ class LimitOrderBook:
         bid: list[PQN],
         ask: list[PQN],
     ) -> None:
-        self.stime = stime
-        self.ticker = ticker
-        self.bid = bid
-        self.ask = ask
-        self.timestamp = Datetime.now()
+        self.__stime = stime
+        self.__ticker = ticker
+        self.__bid = bid
+        self.__ask = ask
+        self.__updated_at = Datetime.now()
+
+    @property
+    def stime(self) -> str:
+        return self.__stime
+
+    @property
+    def ticker(self) -> str:
+        return self.__ticker
+
+    @property
+    def bid(self) -> list[PQN]:
+        return self.__bid
+
+    @property
+    def ask(self) -> list[PQN]:
+        return self.__ask
+
+    @property
+    def updated_at(self) -> datetime.datetime:
+        return self.__updated_at
 
 
 class Price:
@@ -77,9 +134,33 @@ class Price:
         bid: Optional[PQN],
         ask: Optional[PQN],
     ) -> None:
-        self.stime = stime
-        self.ticker = ticker
-        self.trade = trade
-        self.bid = bid
-        self.ask = ask
-        self.timestamp = Datetime.now()
+        self.__stime = stime
+        self.__ticker = ticker
+        self.__trade = trade
+        self.__bid = bid
+        self.__ask = ask
+        self.__updated_at = Datetime.now()
+
+    @property
+    def stime(self) -> str:
+        return self.__stime
+
+    @property
+    def ticker(self) -> str:
+        return self.__ticker
+
+    @property
+    def trade(self) -> PQN:
+        return self.__trade
+
+    @property
+    def bid(self) -> Optional[PQN]:
+        return self.__bid
+
+    @property
+    def ask(self) -> Optional[PQN]:
+        return self.__ask
+
+    @property
+    def updated_at(self) -> datetime.datetime:
+        return self.__updated_at

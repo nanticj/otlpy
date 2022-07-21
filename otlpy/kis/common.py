@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Optional
 
 from httpx import AsyncClient
 
@@ -8,11 +8,67 @@ from otlpy.kis.settings import Settings
 
 class Common:
     def __init__(self, settings: Settings) -> None:
-        self.settings = settings
-        self.url_base = "https://openapi.koreainvestment.com:9443"
-        self.url_ws = "ws://ops.koreainvestment.com:21000"
-        self.authorization = ""
-        self.content_type = "application/json; charset=UTF-8"
+        self.__settings = settings
+        self.__url_base = "https://openapi.koreainvestment.com:9443"
+        self.__url_ws = "ws://ops.koreainvestment.com:21000"
+        self.__authorization = ""
+        self.__content_type = "application/json; charset=UTF-8"
+
+    @property
+    def kis_app_key(self) -> str:
+        return self.__settings.kis_app_key
+
+    @property
+    def kis_app_secret(self) -> str:
+        return self.__settings.kis_app_secret
+
+    @property
+    def kis_account_htsid(self) -> str:
+        return self.__settings.kis_account_htsid
+
+    @property
+    def kis_account_custtype(self) -> str:
+        return self.__settings.kis_account_custtype
+
+    @property
+    def kis_account_cano_domestic_stock(self) -> Optional[str]:
+        return self.__settings.kis_account_cano_domestic_stock
+
+    @property
+    def kis_account_prdt_domestic_stock(self) -> Optional[str]:
+        return self.__settings.kis_account_prdt_domestic_stock
+
+    @property
+    def kis_account_cano_domestic_futureoption(self) -> Optional[str]:
+        return self.__settings.kis_account_cano_domestic_futureoption
+
+    @property
+    def kis_account_prdt_domestic_futureoption(self) -> Optional[str]:
+        return self.__settings.kis_account_prdt_domestic_futureoption
+
+    @property
+    def kis_account_cano_overseas_stock(self) -> Optional[str]:
+        return self.__settings.kis_account_cano_overseas_stock
+
+    @property
+    def kis_account_prdt_overseas_stock(self) -> Optional[str]:
+        return self.__settings.kis_account_prdt_overseas_stock
+
+    @property
+    def url_base(self) -> str:
+        return self.__url_base
+
+    @property
+    def url_ws(self) -> str:
+        return self.__url_ws
+
+    @property
+    def authorization(self) -> str:
+        return self.__authorization
+
+    @property
+    def content_type(self) -> str:
+        return self.__content_type
 
     def headers1(self) -> dict[str, str]:
         return {
@@ -22,15 +78,15 @@ class Common:
     def headers3(self) -> dict[str, str]:
         return {
             "content-type": self.content_type,
-            "appkey": self.settings.kis_app_key,
-            "appsecret": self.settings.kis_app_secret,
+            "appkey": self.kis_app_key,
+            "appsecret": self.kis_app_secret,
         }
 
     def headers4(self) -> dict[str, str]:
         return {
             "content-type": self.content_type,
-            "appkey": self.settings.kis_app_key,
-            "appsecret": self.settings.kis_app_secret,
+            "appkey": self.kis_app_key,
+            "appsecret": self.kis_app_secret,
             "authorization": self.authorization,
         }
 
@@ -56,11 +112,11 @@ class Common:
         headers = self.headers1()
         data = {
             "grant_type": "client_credentials",
-            "appkey": self.settings.kis_app_key,
-            "appsecret": self.settings.kis_app_secret,
+            "appkey": self.kis_app_key,
+            "appsecret": self.kis_app_secret,
         }
         _, rdata = await post(client, url_path, headers, data, sleep, debug)
-        self.authorization = "%s %s" % (
+        self.__authorization = "%s %s" % (
             rdata["token_type"],
             rdata["access_token"],
         )

@@ -1,27 +1,58 @@
+import datetime
 from typing import Any, Optional
 
 import numpy as np
 from loguru import logger
 from tompy.stdlib import Datetime
 
-from otlpy.base import market
+from otlpy.base.market import ORDER_SIDE, ORDER_TYPE, BaseOrder
 
 
-class Order(market.BaseOrder):
+class Order(BaseOrder):
     def __init__(
         self,
-        oside: market.ORDER_SIDE,
-        otype: market.ORDER_TYPE,
+        oside: ORDER_SIDE,
+        otype: ORDER_TYPE,
         ticker: str,
         qty: float,
         price: float,
     ) -> None:
         super().__init__(ticker, oside, otype, qty, price)
-        self.rdata: dict[str, Any] = {}
-        self.uid = ""
-        self.filled: float = 0
-        self.filled_price: float = 0
-        self.opened: float = 0
+        self.__rdata: dict[str, Any] = {}
+        self.__uid = ""
+        self.__filled: float = 0
+        self.__filled_price: float = 0
+        self.__opened: float = 0
+
+    @property
+    def rdata(self) -> dict[str, Any]:
+        return self.__rdata
+
+    @property
+    def uid(self) -> str:
+        return self.__uid
+
+    @property
+    def filled(self) -> float:
+        return self.__filled
+
+    @property
+    def filled_price(self) -> float:
+        return self.__filled_price
+
+    @property
+    def opened(self) -> float:
+        return self.__opened
+
+    def acknowledgment(
+        self,
+        rdata: dict[str, Any],
+        uid: str,
+        opened: float,
+    ) -> None:
+        self.__rdata = rdata
+        self.__uid = uid
+        self.__opened = opened
 
     def filled_event(
         self,
@@ -29,18 +60,16 @@ class Order(market.BaseOrder):
         filled_price: float,
         opened: Optional[float],
     ) -> None:
-        assert 0 <= filled <= self.opened, f"{filled} {self.opened}"
         if opened is None:
             opened = filled
-        assert 0 <= opened <= self.opened, f"{opened} {self.opened}"
+        assert filled <= self.opened and opened <= self.opened
         if filled > 0:
-            total_filled = self.filled + filled
-            self.filled_price = (
+            self.__filled_price = (
                 self.filled * self.filled_price + filled * filled_price
-            ) / total_filled
-            self.filled = total_filled
+            ) / (self.filled + filled)
+            self.__filled += filled
         if opened > 0:
-            self.opened -= opened
+            self.__opened -= opened
 
     def filled_total(
         self,
@@ -48,8 +77,7 @@ class Order(market.BaseOrder):
         total_filled_price: float,
         total_opened: float,
     ) -> tuple[float, float, float]:
-        assert total_filled >= self.filled, f"{total_filled} {self.filled}"
-        assert self.opened >= total_opened, f"{self.opened} {total_opened}"
+        assert total_filled >= self.filled and self.opened >= total_opened
         filled = total_filled - self.filled
         if filled > 0:
             filled_price = (
@@ -66,13 +94,13 @@ class Order(market.BaseOrder):
 class Buy(Order):
     def __init__(
         self,
-        otype: market.ORDER_TYPE,
+        otype: ORDER_TYPE,
         ticker: str,
         qty: float,
         price: float,
     ) -> None:
         super().__init__(
-            market.ORDER_SIDE.BUY,
+            ORDER_SIDE.BUY,
             otype,
             ticker,
             qty,
@@ -83,13 +111,13 @@ class Buy(Order):
 class Sell(Order):
     def __init__(
         self,
-        otype: market.ORDER_TYPE,
+        otype: ORDER_TYPE,
         ticker: str,
         qty: float,
         price: float,
     ) -> None:
         super().__init__(
-            market.ORDER_SIDE.SELL,
+            ORDER_SIDE.SELL,
             otype,
             ticker,
             qty,
@@ -101,23 +129,27 @@ class Cancel(Order):
     def __init__(
         self,
         origin: Order,
-        otype: market.ORDER_TYPE,
+        otype: ORDER_TYPE,
     ) -> None:
         super().__init__(
             origin.oside,
             otype,
             origin.ticker,
             origin.qty,
-            origin.price,
+            0,
         )
-        self.origin = origin
+        self.__origin = origin
+
+    @property
+    def origin(self) -> Order:
+        return self.__origin
 
 
 class Replace(Order):
     def __init__(
         self,
         origin: Order,
-        otype: market.ORDER_TYPE,
+        otype: ORDER_TYPE,
         price: float,
     ) -> None:
         super().__init__(
@@ -127,32 +159,92 @@ class Replace(Order):
             origin.qty,
             price,
         )
-        self.origin = origin
+        self.__origin = origin
+
+    @property
+    def origin(self) -> Order:
+        return self.__origin
 
 
 class Inventory:
     def __init__(
         self,
+        name: str,
         ticker: str,
         ticksize: float,
         unit: float,
         fee: float,
         fee_rate: float,
     ) -> None:
-        assert ticksize > 0 and unit > 0 and fee >= 0 and fee_rate >= 0
-        self.ticker = ticker
-        self.ticksize = ticksize
-        self.unit = unit
-        self.fee = fee
-        self.fee_rate = fee_rate
-        self.orders: dict[str, Order] = {}
-        self.realized_pnl: float = 0
-        self.realized_fee: float = 0
-        self.pos: float = 0
-        self.price: float = 0
-        self.opened_buy: float = 0
-        self.opened_sell: float = 0
-        self.timestamp = Datetime.now()
+        assert (
+            ticker and ticksize > 0 and unit > 0 and fee >= 0 and fee_rate >= 0
+        )
+        self.__name = name
+        self.__ticker = ticker
+        self.__ticksize = ticksize
+        self.__unit = unit
+        self.__fee = fee
+        self.__fee_rate = fee_rate
+        self.__orders: dict[str, Order] = {}
+        self.__realized_pnl: float = 0
+        self.__realized_fee: float = 0
+        self.__pos: float = 0
+        self.__price: float = 0
+        self.__opened_buy: float = 0
+        self.__opened_sell: float = 0
+        self.__updated_at = Datetime.now()
+
+    @property
+    def name(self) -> str:
+        return self.__name
+
+    @property
+    def ticker(self) -> str:
+        return self.__ticker
+
+    @property
+    def ticksize(self) -> float:
+        return self.__ticksize
+
+    @property
+    def unit(self) -> float:
+        return self.__unit
+
+    @property
+    def fee(self) -> float:
+        return self.__fee
+
+    @property
+    def fee_rate(self) -> float:
+        return self.__fee_rate
+
+    @property
+    def realized_pnl(self) -> float:
+        return self.__realized_pnl
+
+    @property
+    def realized_fee(self) -> float:
+        return self.__realized_fee
+
+    @property
+    def pos(self) -> float:
+        return self.__pos
+
+    @property
+    def price(self) -> float:
+        return self.__price
+
+    @property
+    def opened_buy(self) -> float:
+        return self.__opened_buy
+
+    @property
+    def opened_sell(self) -> float:
+        return self.__opened_sell
+
+    @property
+    def updated_at(self) -> datetime.datetime:
+        return self.__updated_at
 
     def bid_adjust(self, price: float) -> float:
         return float(np.floor(price / self.ticksize) * self.ticksize)
@@ -175,12 +267,13 @@ class Inventory:
         )
 
     def add_order(self, order: Order) -> None:
-        assert self.ticker == order.ticker, f"{self.ticker} {order.ticker}"
-        self.orders[order.uid] = order
-        if order.oside == market.ORDER_SIDE.BUY:
-            self.opened_buy += order.opened
-        elif order.oside == market.ORDER_SIDE.SELL:
-            self.opened_sell += order.opened
+        assert self.ticker == order.ticker
+        assert self.__orders.get(order.uid) is None
+        self.__orders[order.uid] = order
+        if order.oside == ORDER_SIDE.BUY:
+            self.__opened_buy += order.opened
+        elif order.oside == ORDER_SIDE.SELL:
+            self.__opened_sell += order.opened
         else:
             assert False
 
@@ -191,22 +284,23 @@ class Inventory:
     ) -> None:
         if self.pos * pos > 0:
             pp = self.price * self.pos + price * pos
-            self.pos += pos
-            self.price = pp / self.pos
+            self.__pos += pos
+            self.__price = pp / self.pos
         elif np.abs(pos) <= np.abs(self.pos):
-            self.realized_pnl += (self.price - price) * pos * self.unit
-            self.pos += pos
+            self.__realized_pnl += (self.price - price) * pos * self.unit
+            self.__pos += pos
         else:
-            self.realized_pnl += (price - self.price) * self.pos * self.unit
-            self.price = price
-            self.pos += pos
-        self.realized_fee += (
+            self.__realized_pnl += (price - self.price) * self.pos * self.unit
+            self.__price = price
+            self.__pos += pos
+        self.__realized_fee += (
             self.fee + price * self.unit * self.fee_rate
         ) * np.abs(pos)
-        self.timestamp = Datetime.now()
+        self.__updated_at = Datetime.now()
         ur_pnl = self.unrealized_pnl(price)
         pnl = self.total_pnl(price)
         logger.info(
+            f"INV {self.name} "
             f"FIL {pos} {price} "
             f"POS {self.pos} {self.price} "
             f"PNL {pnl} = {self.realized_pnl} - {self.realized_fee} + {ur_pnl}"
@@ -224,11 +318,11 @@ class Inventory:
             total_filled_price,
             total_opened,
         )
-        if order.oside == market.ORDER_SIDE.BUY:
-            self.opened_buy -= opened
+        if order.oside == ORDER_SIDE.BUY:
+            self.__opened_buy -= opened
             pos = filled
-        elif order.oside == market.ORDER_SIDE.SELL:
-            self.opened_sell -= opened
+        elif order.oside == ORDER_SIDE.SELL:
+            self.__opened_sell -= opened
             pos = -filled
         else:
             assert False
@@ -236,41 +330,39 @@ class Inventory:
             self.filled_position(pos, filled_price)
 
     def check_validity(self) -> None:
-        filled_buy: float = 0
-        filled_sell: float = 0
+        pos: float = 0
         opened_buy: float = 0
         opened_sell: float = 0
-        for order in self.orders.values():
-            if order.oside == market.ORDER_SIDE.BUY:
-                filled_buy += order.filled
+        for order in self.__orders.values():
+            if order.oside == ORDER_SIDE.BUY:
+                pos += order.filled
                 opened_buy += order.opened
-            elif order.oside == market.ORDER_SIDE.SELL:
-                filled_sell += order.filled
+            elif order.oside == ORDER_SIDE.SELL:
+                pos -= order.filled
                 opened_sell += order.opened
             else:
                 assert False
-        assert (
-            self.pos == filled_buy - filled_sell
-        ), f"{self.pos} {filled_buy} {filled_sell}"
-        assert self.opened_buy == opened_buy, f"{self.opened_buy} {opened_buy}"
-        assert (
-            self.opened_sell == opened_sell
-        ), f"{self.opened_sell} {opened_sell}"
+        assert self.pos == pos
+        assert self.opened_buy == opened_buy
+        assert self.opened_sell == opened_sell
 
 
 class Book:
     def __init__(self) -> None:
-        self.ois: dict[str, tuple[Order, Inventory]] = {}
+        self.__ois: dict[str, tuple[Order, Inventory]] = {}
 
     def add(self, order: Order, inventory: Inventory) -> None:
         if order.uid:
-            self.ois[order.uid] = (order, inventory)
+            assert order.ticker == inventory.ticker
+            self.__ois[order.uid] = (order, inventory)
             inventory.add_order(order)
 
     def get(self, uid: str) -> tuple[Optional[Order], Optional[Inventory]]:
         if uid:
-            oi = self.ois.get(uid)
+            oi = self.__ois.get(uid)
             if oi is None:
                 return None, None
-            return oi
+            order, inventory = oi
+            assert order.ticker == inventory.ticker
+            return order, inventory
         return None, None

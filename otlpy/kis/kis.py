@@ -5,5 +5,13 @@ from otlpy.kis.settings import Settings
 
 class KIS:
     def __init__(self, settings: Settings) -> None:
-        self.common = Common(settings)
-        self.domestic_stock = DomesticStock(self.common)
+        self.__common = Common(settings)
+        self.__domestic_stock = DomesticStock(self.common)
+
+    @property
+    def common(self) -> Common:
+        return self.__common
+
+    @property
+    def domestic_stock(self) -> DomesticStock:
+        return self.__domestic_stock
