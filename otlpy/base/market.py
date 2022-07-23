@@ -28,22 +28,18 @@ class ORDER_TYPE(Enum):
 class BaseOrder:
     def __init__(
         self,
-        ticker: str,
         oside: ORDER_SIDE,
         otype: ORDER_TYPE,
+        ticker: str,
         qty: float,
         price: float,
     ) -> None:
-        self.__ticker = ticker
         self.__oside = oside
         self.__otype = otype
+        self.__ticker = ticker
         self.__qty = qty
         self.__price = price
         self.__updated_at = Datetime.now()
-
-    @property
-    def ticker(self) -> str:
-        return self.__ticker
 
     @property
     def oside(self) -> ORDER_SIDE:
@@ -52,6 +48,10 @@ class BaseOrder:
     @property
     def otype(self) -> ORDER_TYPE:
         return self.__otype
+
+    @property
+    def ticker(self) -> str:
+        return self.__ticker
 
     @property
     def qty(self) -> float:
