@@ -1,38 +1,37 @@
 from typing import Any, Union
 
-from httpx import AsyncClient
 from loguru import logger
 
 from otlpy.base.account import Buy, Cancel, Order, Replace, Sell
 from otlpy.base.market import ORDER_SIDE, ORDER_TYPE
-from otlpy.base.net import get, post
+from otlpy.base.net import AsyncHttpClient, AsyncWebSocketClient
 from otlpy.kis.common import Common
 
 
+def str_order_type(order_type: ORDER_TYPE) -> str:
+    if order_type == ORDER_TYPE.LIMIT:
+        s = "00"
+    elif order_type == ORDER_TYPE.MARKET:
+        s = "01"
+    else:
+        assert False
+    return s
+
+
 class DomesticStock:
-    def __init__(self, common: Common) -> None:
+    def __init__(self, common: Common, client: AsyncHttpClient) -> None:
         self.__common = common
+        self.__client = client
 
     @property
-    def common(self) -> Common:
+    def _common(self) -> Common:
         return self.__common
 
-    def order_type(self, order_type: ORDER_TYPE) -> str:
-        if order_type == ORDER_TYPE.LIMIT:
-            s = "00"
-        elif order_type == ORDER_TYPE.MARKET:
-            s = "01"
-        else:
-            assert False
-        return s
+    @property
+    def _client(self) -> AsyncHttpClient:
+        return self.__client
 
-    async def new_order(
-        self,
-        client: AsyncClient,
-        order: Union[Buy, Sell],
-        sleep: float,
-        debug: bool,
-    ) -> Order:
+    async def new_order(self, order: Union[Buy, Sell]) -> Order:
         if order.oside == ORDER_SIDE.BUY:
             tr_id = "TTTC0802U"
         elif order.oside == ORDER_SIDE.SELL:
@@ -41,21 +40,19 @@ class DomesticStock:
             assert False
         url_path = "/uapi/domestic-stock/v1/trading/order-cash"
         data = {
-            "CANO": self.common.kis_account_cano_domestic_stock,
-            "ACNT_PRDT_CD": self.common.kis_account_prdt_domestic_stock,
+            "CANO": self._common.account_cano_domestic_stock,
+            "ACNT_PRDT_CD": self._common.account_prdt_domestic_stock,
             "PDNO": order.ticker,
-            "ORD_DVSN": self.order_type(order.otype),
+            "ORD_DVSN": str_order_type(order.otype),
             "ORD_QTY": str(int(order.qty)),
             "ORD_UNPR": str(int(order.price)),
         }
         headers = {
-            **self.common.headers4(),
+            **self._common.headers4(),
             "tr_id": tr_id,
-            "hashkey": await self.common.hash(client, data, 0, False),
+            "hashkey": await self._common.hash(self._client, data),
         }
-        rheaders, rdata = await post(
-            client, url_path, headers, data, sleep, debug
-        )
+        rheaders, rdata = await self._client.post(url_path, headers, data)
         if not rdata or rdata["rt_cd"] != "0":
             logger.error(
                 "\n%s\n%s\n%s\n%s\n%s"
@@ -67,11 +64,7 @@ class DomesticStock:
         return order
 
     async def cancel_or_replace_order(
-        self,
-        client: AsyncClient,
-        order: Union[Cancel, Replace],
-        sleep: float,
-        debug: bool,
+        self, order: Union[Cancel, Replace]
     ) -> Order:
         if isinstance(order, Cancel):
             omsg = "02"
@@ -82,24 +75,22 @@ class DomesticStock:
         tr_id = "TTTC0803U"
         url_path = "/uapi/domestic-stock/v1/trading/order-rvsecncl"
         data = {
-            "CANO": self.common.kis_account_cano_domestic_stock,
-            "ACNT_PRDT_CD": self.common.kis_account_prdt_domestic_stock,
+            "CANO": self._common.account_cano_domestic_stock,
+            "ACNT_PRDT_CD": self._common.account_prdt_domestic_stock,
             "KRX_FWDG_ORD_ORGNO": order.origin.rdata["KRX_FWDG_ORD_ORGNO"],
             "ORGN_ODNO": order.origin.rdata["ODNO"],
-            "ORD_DVSN": self.order_type(order.otype),
+            "ORD_DVSN": str_order_type(order.otype),
             "RVSE_CNCL_DVSN_CD": omsg,
             "ORD_QTY": str(int(order.qty)),
             "ORD_UNPR": str(int(order.price)),
             "QTY_ALL_ORD_YN": "Y",
         }
         headers = {
-            **self.common.headers4(),
+            **self._common.headers4(),
             "tr_id": tr_id,
-            "hashkey": await self.common.hash(client, data, 0, False),
+            "hashkey": await self._common.hash(self._client, data),
         }
-        rheaders, rdata = await post(
-            client, url_path, headers, data, sleep, debug
-        )
+        rheaders, rdata = await self._client.post(url_path, headers, data)
         if not rdata or rdata["rt_cd"] != "0":
             logger.error(
                 "\n%s\n%s\n%s\n%s\n%s"
@@ -107,175 +98,66 @@ class DomesticStock:
             )
             return order
         rdata_output = rdata["output"]
-        order.acknowledgment(rdata_output, rdata_output["ODNO"], order.qty)
+        if isinstance(order, Cancel):
+            order.acknowledgment(rdata_output, rdata_output["ODNO"], 0)
+        elif isinstance(order, Replace):
+            order.acknowledgment(rdata_output, rdata_output["ODNO"], order.qty)
+        else:
+            assert False
         return order
 
     async def buy(
-        self,
-        client: AsyncClient,
-        order_type: ORDER_TYPE,
-        ticker: str,
-        qty: int,
-        price: int,
-        sleep: float,
-        debug: bool,
+        self, order_type: ORDER_TYPE, ticker: str, qty: int, price: int
     ) -> Order:
-        return await self.new_order(
-            client, Buy(order_type, ticker, int(qty), int(price)), sleep, debug
-        )
+        return await self.new_order(Buy(order_type, ticker, qty, price))
 
-    async def buy_market(
-        self,
-        client: AsyncClient,
-        ticker: str,
-        qty: int,
-        sleep: float,
-        debug: bool,
-    ) -> Order:
-        return await self.buy(
-            client, ORDER_TYPE.MARKET, ticker, qty, 0, sleep, debug
-        )
+    async def buy_market(self, ticker: str, qty: int) -> Order:
+        return await self.buy(ORDER_TYPE.MARKET, ticker, qty, 0)
 
-    async def buy_limit(
-        self,
-        client: AsyncClient,
-        ticker: str,
-        qty: int,
-        price: int,
-        sleep: float,
-        debug: bool,
-    ) -> Order:
-        return await self.buy(
-            client, ORDER_TYPE.LIMIT, ticker, qty, price, sleep, debug
-        )
+    async def buy_limit(self, ticker: str, qty: int, price: int) -> Order:
+        return await self.buy(ORDER_TYPE.LIMIT, ticker, qty, price)
 
     async def sell(
-        self,
-        client: AsyncClient,
-        order_type: ORDER_TYPE,
-        ticker: str,
-        qty: int,
-        price: int,
-        sleep: float,
-        debug: bool,
+        self, order_type: ORDER_TYPE, ticker: str, qty: int, price: int
     ) -> Order:
-        return await self.new_order(
-            client,
-            Sell(order_type, ticker, int(qty), int(price)),
-            sleep,
-            debug,
-        )
+        return await self.new_order(Sell(order_type, ticker, qty, price))
 
-    async def sell_market(
-        self,
-        client: AsyncClient,
-        ticker: str,
-        qty: int,
-        sleep: float,
-        debug: bool,
-    ) -> Order:
-        return await self.sell(
-            client, ORDER_TYPE.MARKET, ticker, qty, 0, sleep, debug
-        )
+    async def sell_market(self, ticker: str, qty: int) -> Order:
+        return await self.sell(ORDER_TYPE.MARKET, ticker, qty, 0)
 
-    async def sell_limit(
-        self,
-        client: AsyncClient,
-        ticker: str,
-        qty: int,
-        price: int,
-        sleep: float,
-        debug: bool,
-    ) -> Order:
-        return await self.sell(
-            client, ORDER_TYPE.LIMIT, ticker, qty, price, sleep, debug
-        )
+    async def sell_limit(self, ticker: str, qty: int, price: int) -> Order:
+        return await self.sell(ORDER_TYPE.LIMIT, ticker, qty, price)
 
-    async def cancel(
-        self,
-        client: AsyncClient,
-        origin: Order,
-        order_type: ORDER_TYPE,
-        sleep: float,
-        debug: bool,
-    ) -> Order:
+    async def cancel(self, origin: Order) -> Order:
         return await self.cancel_or_replace_order(
-            client, Cancel(origin, order_type), sleep, debug
-        )
-
-    async def cancel_market(
-        self,
-        client: AsyncClient,
-        origin: Order,
-        sleep: float,
-        debug: bool,
-    ) -> Order:
-        return await self.cancel(
-            client, origin, ORDER_TYPE.MARKET, sleep, debug
-        )
-
-    async def cancel_limit(
-        self,
-        client: AsyncClient,
-        origin: Order,
-        sleep: float,
-        debug: bool,
-    ) -> Order:
-        return await self.cancel(
-            client, origin, ORDER_TYPE.LIMIT, sleep, debug
+            Cancel(origin, ORDER_TYPE.LIMIT)
         )
 
     async def replace(
-        self,
-        client: AsyncClient,
-        origin: Order,
-        order_type: ORDER_TYPE,
-        price: int,
-        sleep: float,
-        debug: bool,
+        self, origin: Order, order_type: ORDER_TYPE, price: int
     ) -> Order:
         return await self.cancel_or_replace_order(
-            client, Replace(origin, order_type, int(price)), sleep, debug
+            Replace(origin, order_type, price)
         )
 
-    async def replace_market(
-        self,
-        client: AsyncClient,
-        origin: Order,
-        sleep: float,
-        debug: bool,
-    ) -> Order:
-        return await self.replace(
-            client, origin, ORDER_TYPE.MARKET, 0, sleep, debug
-        )
+    async def replace_market(self, origin: Order) -> Order:
+        return await self.replace(origin, ORDER_TYPE.MARKET, 0)
 
-    async def replace_limit(
-        self,
-        client: AsyncClient,
-        origin: Order,
-        price: int,
-        sleep: float,
-        debug: bool,
-    ) -> Order:
-        return await self.replace(
-            client, origin, ORDER_TYPE.LIMIT, price, sleep, debug
-        )
+    async def replace_limit(self, origin: Order, price: int) -> Order:
+        return await self.replace(origin, ORDER_TYPE.LIMIT, price)
 
     async def all_orders(
         self,
-        client: AsyncClient,
         yyyymmdd: str,
         tr_cont: str,
         ctx_area_fk100: str,
         ctx_area_nk100: str,
-        sleep: float,
-        debug: bool,
     ) -> tuple[list[Any], str, str, str]:
         tr_id = "TTTC8001R"
         url_path = "/uapi/domestic-stock/v1/trading/inquire-daily-ccld"
         data = {
-            "CANO": self.common.kis_account_cano_domestic_stock,
-            "ACNT_PRDT_CD": self.common.kis_account_prdt_domestic_stock,
+            "CANO": self._common.account_cano_domestic_stock,
+            "ACNT_PRDT_CD": self._common.account_prdt_domestic_stock,
             "INQR_STRT_DT": yyyymmdd,
             "INQR_END_DT": yyyymmdd,
             "SLL_BUY_DVSN_CD": "00",
@@ -290,13 +172,11 @@ class DomesticStock:
             "CTX_AREA_NK100": ctx_area_nk100,
         }
         headers = {
-            **self.common.headers4(),
+            **self._common.headers4(),
             "tr_id": tr_id,
             "tr_cont": tr_cont,
         }
-        rheaders, rdata = await get(
-            client, url_path, headers, data, sleep, debug
-        )
+        rheaders, rdata = await self._client.get(url_path, headers, data)
         if not rdata or rdata["rt_cd"] != "0":
             logger.error(
                 "\n%s\n%s\n%s\n%s\n%s"
@@ -314,43 +194,7 @@ class DomesticStock:
             )
         assert False
 
-    async def loop_all_orders(
-        self,
-        client: AsyncClient,
-        yyyymmdd: str,
-        sleep: float,
-        debug: bool,
-    ) -> list[Any]:
-        tr_cont = ""
-        ctx_area_fk100 = ""
-        ctx_area_nk100 = ""
-        outlist: list[Any] = []
-        while True:
-            (
-                out0,
-                tr_cont,
-                ctx_area_fk100,
-                ctx_area_nk100,
-            ) = await self.all_orders(
-                client,
-                yyyymmdd,
-                tr_cont,
-                ctx_area_fk100,
-                ctx_area_nk100,
-                sleep,
-                debug,
-            )
-            outlist = outlist + out0
-            if not tr_cont:
-                return outlist
-
-    async def limitorderbook(
-        self,
-        client: AsyncClient,
-        ticker: str,
-        sleep: float,
-        debug: bool,
-    ) -> dict[str, Any]:
+    async def limitorderbook(self, ticker: str) -> dict[str, Any]:
         tr_id = "FHKST01010200"
         url_path = (
             "/uapi/domestic-stock/v1/quotations/inquire-asking-price-exp-ccn"
@@ -360,12 +204,10 @@ class DomesticStock:
             "FID_INPUT_ISCD": ticker,
         }
         headers = {
-            **self.common.headers4(),
+            **self._common.headers4(),
             "tr_id": tr_id,
         }
-        rheaders, rdata = await get(
-            client, url_path, headers, data, sleep, debug
-        )
+        rheaders, rdata = await self._client.get(url_path, headers, data)
         if not rdata or rdata["rt_cd"] != "0":
             logger.error(
                 "\n%s\n%s\n%s\n%s\n%s"
@@ -374,36 +216,27 @@ class DomesticStock:
             return {}
         return dict(rdata["output1"])
 
-    def ws_senddata(self, subscribe: bool, tr_id: str, tr_key: str) -> str:
-        if subscribe:
-            tr_type = "1"
-        else:
-            tr_type = "2"
-        return (
-            '{"header":{"appkey":"'
-            + self.common.kis_app_key
-            + '","appsecret":"'
-            + self.common.kis_app_secret
-            + '","custtype":"'
-            + self.common.kis_account_custtype
-            + '","tr_type":"'
-            + tr_type
-            + '","content-type":"utf-8"},"body":{"input":{"tr_id":"'
-            + tr_id
-            + '","tr_key":"'
-            + tr_key
-            + '"}}}'
-        )
 
-    def ws_senddata_trade(self, ticker: str, subscribe: bool = True) -> str:
-        return self.ws_senddata(subscribe, "H0STCNT0", ticker)
+class DomesticStockWS:
+    def __init__(self, common: Common, ws: AsyncWebSocketClient) -> None:
+        self.__common = common
+        self.__ws = ws
 
-    def ws_senddata_orderbook(
-        self, ticker: str, subscribe: bool = True
-    ) -> str:
-        return self.ws_senddata(subscribe, "H0STASP0", ticker)
+    @property
+    def _common(self) -> Common:
+        return self.__common
 
-    def ws_senddata_execution(self, subscribe: bool = True) -> str:
-        return self.ws_senddata(
-            subscribe, "H0STCNI0", self.common.kis_account_htsid
+    @property
+    def _ws(self) -> AsyncWebSocketClient:
+        return self.__ws
+
+    def senddata_trade(self, ticker: str, subscribe: bool = True) -> str:
+        return self._common.ws_senddata(subscribe, "H0STCNT0", ticker)
+
+    def senddata_orderbook(self, ticker: str, subscribe: bool = True) -> str:
+        return self._common.ws_senddata(subscribe, "H0STASP0", ticker)
+
+    def senddata_execution(self, subscribe: bool = True) -> str:
+        return self._common.ws_senddata(
+            subscribe, "H0STCNI0", self._common.account_htsid
         )

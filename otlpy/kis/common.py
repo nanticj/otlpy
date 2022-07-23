@@ -1,8 +1,6 @@
 from typing import Any, Optional
 
-from httpx import AsyncClient
-
-from otlpy.base.net import post
+from otlpy.base.net import AsyncHttpClient
 from otlpy.kis.settings import Settings
 
 
@@ -15,44 +13,8 @@ class Common:
         self.__content_type = "application/json; charset=UTF-8"
 
     @property
-    def kis_app_key(self) -> str:
-        return self.__settings.kis_app_key
-
-    @property
-    def kis_app_secret(self) -> str:
-        return self.__settings.kis_app_secret
-
-    @property
-    def kis_account_htsid(self) -> str:
-        return self.__settings.kis_account_htsid
-
-    @property
-    def kis_account_custtype(self) -> str:
-        return self.__settings.kis_account_custtype
-
-    @property
-    def kis_account_cano_domestic_stock(self) -> Optional[str]:
-        return self.__settings.kis_account_cano_domestic_stock
-
-    @property
-    def kis_account_prdt_domestic_stock(self) -> Optional[str]:
-        return self.__settings.kis_account_prdt_domestic_stock
-
-    @property
-    def kis_account_cano_domestic_futureoption(self) -> Optional[str]:
-        return self.__settings.kis_account_cano_domestic_futureoption
-
-    @property
-    def kis_account_prdt_domestic_futureoption(self) -> Optional[str]:
-        return self.__settings.kis_account_prdt_domestic_futureoption
-
-    @property
-    def kis_account_cano_overseas_stock(self) -> Optional[str]:
-        return self.__settings.kis_account_cano_overseas_stock
-
-    @property
-    def kis_account_prdt_overseas_stock(self) -> Optional[str]:
-        return self.__settings.kis_account_prdt_overseas_stock
+    def _settings(self) -> Settings:
+        return self.__settings
 
     @property
     def url_base(self) -> str:
@@ -63,60 +25,112 @@ class Common:
         return self.__url_ws
 
     @property
-    def authorization(self) -> str:
+    def _authorization(self) -> str:
         return self.__authorization
 
+    def _set_authorization(self, authorization: str) -> None:
+        self.__authorization = authorization
+
     @property
-    def content_type(self) -> str:
+    def _content_type(self) -> str:
         return self.__content_type
+
+    @property
+    def _app_key(self) -> str:
+        return self._settings.kis_app_key
+
+    @property
+    def _app_secret(self) -> str:
+        return self._settings.kis_app_secret
+
+    @property
+    def account_htsid(self) -> str:
+        return self._settings.kis_account_htsid
+
+    @property
+    def _account_custtype(self) -> str:
+        return self._settings.kis_account_custtype
+
+    @property
+    def account_cano_domestic_stock(self) -> Optional[str]:
+        return self._settings.kis_account_cano_domestic_stock
+
+    @property
+    def account_prdt_domestic_stock(self) -> Optional[str]:
+        return self._settings.kis_account_prdt_domestic_stock
+
+    @property
+    def account_cano_domestic_futureoption(self) -> Optional[str]:
+        return self._settings.kis_account_cano_domestic_futureoption
+
+    @property
+    def account_prdt_domestic_futureoption(self) -> Optional[str]:
+        return self._settings.kis_account_prdt_domestic_futureoption
+
+    @property
+    def account_cano_overseas_stock(self) -> Optional[str]:
+        return self._settings.kis_account_cano_overseas_stock
+
+    @property
+    def account_prdt_overseas_stock(self) -> Optional[str]:
+        return self._settings.kis_account_prdt_overseas_stock
 
     def headers1(self) -> dict[str, str]:
         return {
-            "content-type": self.content_type,
+            "content-type": self._content_type,
         }
 
     def headers3(self) -> dict[str, str]:
         return {
-            "content-type": self.content_type,
-            "appkey": self.kis_app_key,
-            "appsecret": self.kis_app_secret,
+            "content-type": self._content_type,
+            "appkey": self._app_key,
+            "appsecret": self._app_secret,
         }
 
     def headers4(self) -> dict[str, str]:
         return {
-            "content-type": self.content_type,
-            "appkey": self.kis_app_key,
-            "appsecret": self.kis_app_secret,
-            "authorization": self.authorization,
+            "content-type": self._content_type,
+            "appkey": self._app_key,
+            "appsecret": self._app_secret,
+            "authorization": self._authorization,
         }
 
-    async def hash(
-        self,
-        client: AsyncClient,
-        data: Any,
-        sleep: float,
-        debug: bool,
-    ) -> str:
+    async def hash(self, client: AsyncHttpClient, data: Any) -> str:
         url_path = "/uapi/hashkey"
         headers = self.headers3()
-        _, rdata = await post(client, url_path, headers, data, sleep, debug)
+        _, rdata = await client.post(url_path, headers, data)
         return str(rdata["HASH"])
 
-    async def token(
-        self,
-        client: AsyncClient,
-        sleep: float,
-        debug: bool,
-    ) -> None:
+    async def token(self, client: AsyncHttpClient) -> None:
         url_path = "/oauth2/tokenP"
         headers = self.headers1()
         data = {
             "grant_type": "client_credentials",
-            "appkey": self.kis_app_key,
-            "appsecret": self.kis_app_secret,
+            "appkey": self._app_key,
+            "appsecret": self._app_secret,
         }
-        _, rdata = await post(client, url_path, headers, data, sleep, debug)
-        self.__authorization = "%s %s" % (
-            rdata["token_type"],
-            rdata["access_token"],
+        _, rdata = await client.post(url_path, headers, data)
+        self._set_authorization(
+            "%s %s" % (rdata["token_type"], rdata["access_token"])
+        )
+
+    def ws_senddata(self, subscribe: bool, tr_id: str, tr_key: str) -> str:
+        if subscribe:
+            tr_type = "1"
+        else:
+            tr_type = "2"
+        return (
+            '{"header":{"appkey":"'
+            + self._app_key
+            + '","appsecret":"'
+            + self._app_secret
+            + '","custtype":"'
+            + self._account_custtype
+            + '","tr_type":"'
+            + tr_type
+            + '","content-type":"utf-8"},"body":{"input":{"tr_id":"'
+            + tr_id
+            + '","tr_key":"'
+            + tr_key
+            + '"}}}'
         )
